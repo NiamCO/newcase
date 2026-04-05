@@ -164,7 +164,7 @@ async function removeItemsFromInventory(ids) {
   gameState.inventory = gameState.inventory.filter(i => !ids.includes(i.id));
   if(sbClient && currentUser && currentUser.id !== 'local') {
     try {
-      await sbClient.from('inventory').delete().in('id', ids);
+      await sbClient.from('inventory').delete().eq('user_id', currentUser.id).in('id', ids);
     } catch(e) { console.error('Remove items error:', e); }
   }
 }
