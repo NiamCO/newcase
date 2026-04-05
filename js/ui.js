@@ -401,41 +401,8 @@ function renderCrash() {
 // ============================================================
 function renderPlinko() {
   const canvas = document.getElementById('plinko-canvas');
-  if(!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W=canvas.width, H=canvas.height;
-  ctx.clearRect(0,0,W,H);
-  const cellW=W/15;
-
-  // Pegs
-  for(let row=0;row<PLINKO_ROWS;row++){
-    const pegsInRow=row+2;
-    for(let peg=0;peg<pegsInRow;peg++){
-      const px=W/2-((pegsInRow-1)/2-peg)*cellW;
-      const py=40+row*((H-120)/PLINKO_ROWS);
-      ctx.beginPath();
-      ctx.arc(px,py,5,0,Math.PI*2);
-      ctx.fillStyle='#35c895';
-      ctx.shadowBlur=10; ctx.shadowColor='#35c895';
-      ctx.fill(); ctx.shadowBlur=0;
-    }
-  }
-
-  // Slots
-  PLINKO_MULTIPLIERS.forEach((mult,i)=>{
-    const sx=i*cellW, sy=H-50;
-    const hue=mult>=5?45:mult>=2?120:mult>=1?200:0;
-    ctx.fillStyle=`hsl(${hue},80%,20%)`;
-    ctx.strokeStyle=`hsl(${hue},80%,60%)`;
-    ctx.lineWidth=1.5;
-    ctx.beginPath();
-    ctx.roundRect(sx+2,sy,cellW-4,40,4);
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle=`hsl(${hue},80%,80%)`;
-    ctx.font='bold 9px Poppins';
-    ctx.textAlign='center';
-    ctx.fillText(mult+'x',sx+cellW/2,sy+25);
-  });
+  if (!canvas) return;
+  drawPlinkoBoard(canvas); // uses physics engine from minigames.js
 }
 
 // ============================================================
