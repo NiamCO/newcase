@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Minecraft Case Simulator</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <div class="auth-logo">
+      <svg class="auth-logo-icon" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="logo_g" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#35c895"/>
+            <stop offset="100%" stop-color="#06b6d4"/>
+          </linearGradient>
+          <filter id="logo_glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <polygon points="40,6 68,22 68,58 40,74 12,58 12,22" fill="url(#logo_g)" opacity="0.25" filter="url(#logo_glow)"/>
+        <polygon points="40,6 68,22 40,38 12,22" fill="url(#logo_g)" opacity="0.7"/>
+        <polygon points="12,22 40,38 40,74 12,58" fill="#35c895" opacity="0.5"/>
+        <polygon points="68,22 40,38 40,74 68,58" fill="#06b6d4" opacity="0.6"/>
+        <polygon points="40,6 68,22 68,58 40,74 12,58 12,22" fill="none" stroke="url(#logo_g)" stroke-width="2"/>
+        <circle cx="40" cy="38" r="6" fill="white" opacity="0.9" filter="url(#logo_glow)"/>
+      </svg>
+      <h1>MINECRAFT CASES</h1>
+      <p>Open cases. Collect treasures. Rule the leaderboard.</p>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchAuthTab('login')">Login</button>
+      <button class="auth-tab" onclick="switchAuthTab('signup')">Sign Up</button>
+    </div>
+    <div class="auth-form" id="login-form">
+      <div class="auth-error" id="login-error"></div>
+      <input class="auth-input" id="login-username" type="text" placeholder="Username" autocomplete="username"/>
+      <input class="auth-input" id="login-password" type="password" placeholder="Password" autocomplete="current-password"/>
+      <button class="btn-primary" onclick="handleLogin()">Login</button>
+      <button class="btn-secondary" onclick="handleLocalPlay()">▶ Play Locally (No Account)</button>
+    </div>
+    <div class="auth-form hidden" id="signup-form">
+      <div class="auth-error" id="signup-error"></div>
+      <input class="auth-input" id="signup-username" type="text" placeholder="Username"/>
+      <input class="auth-input" id="signup-password" type="password" placeholder="Password"/>
+      <input class="auth-input" id="signup-confirm" type="password" placeholder="Confirm Password"/>
+      <button class="btn-primary" onclick="handleSignup()">Create Account</button>
+    </div>
+  </div>
+</div>
+
+<!-- GAME SCREEN -->
+<div id="game-screen">
+  <header class="topbar">
+    <div class="topbar-logo">⬛ MC CASES</div>
+    <button class="daily-btn" id="daily-btn" onclick="claimDailyReward()" style="display:none">
+      🎁 Daily: <span class="daily-reward-amt">$100</span>
+    </button>
+    <div class="topbar-spacer"></div>
+    <div class="money-display">💰 <span id="money-display">$1,000</span></div>
+    <button class="user-btn" onclick="showStatsModal()">👤 <span id="user-display">Player</span></button>
+  </header>
+
+  <nav class="nav-tabs">
+    <button class="nav-tab active" data-tab="cases"       onclick="switchTab('cases')">⬛ CASES</button>
+    <button class="nav-tab"        data-tab="inventory"   onclick="switchTab('inventory')">🎒 INVENTORY</button>
+    <button class="nav-tab"        data-tab="shop"        onclick="switchTab('shop')">🛒 SHOP</button>
+    <button class="nav-tab"        data-tab="upgrades"    onclick="switchTab('upgrades')">⚗️ UPGRADES</button>
+    <button class="nav-tab"        data-tab="leaderboard" onclick="switchTab('leaderboard')">🏆 LEADERBOARD</button>
+    <button class="nav-tab"        data-tab="slots"       onclick="switchTab('slots')">🎰 SLOTS</button>
+    <button class="nav-tab"        data-tab="crash"       onclick="switchTab('crash')">📈 CRASH</button>
+    <button class="nav-tab"        data-tab="plinko"      onclick="switchTab('plinko')">🎯 PLINKO</button>
+  </nav>
+
+  <main class="game-content">
+
+    <!-- CASES -->
+    <div class="tab-content active" id="cases-tab">
+      <div class="section-header">
+        <h2 class="section-title">Choose a Case</h2>
+        <span style="color:var(--text-dim);font-size:0.85rem">50 cases available</span>
+      </div>
+      <div id="cases-grid"></div>
+    </div>
+
+    <!-- INVENTORY -->
+    <div class="tab-content" id="inventory-tab">
+      <div class="section-header">
+        <h2 class="section-title">Inventory</h2>
+        <span class="inv-count" id="inv-count">0 items</span>
+      </div>
+      <div class="inventory-toolbar">
+        <button class="btn-secondary" onclick="selectAllItems()">Select All</button>
+        <button class="btn-secondary" onclick="selectedItems.clear();renderInventory()">Deselect All</button>
+      </div>
+      <div id="inventory-grid"></div>
+      <div class="sell-bar" id="sell-bar" style="display:none">
+        <div class="sell-info">
+          <span id="sell-count">0</span> items selected — Total: <span id="sell-total" style="color:var(--accent)">$0</span>
+        </div>
+        <button class="btn-primary" onclick="sellSelectedItems()">💰 Sell</button>
+        <button class="btn-secondary" onclick="selectedItems.clear();renderInventory()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- SHOP -->
+    <div class="tab-content" id="shop-tab">
+      <div class="shop-header">
+        <h2 class="section-title">Daily Shop</h2>
+        <span class="shop-timer" id="shop-timer">Refreshes in: 24h 0m</span>
+      </div>
+      <div id="shop-grid"></div>
+    </div>
+
+    <!-- UPGRADES -->
+    <div class="tab-content" id="upgrades-tab">
+      <div class="section-header"><h2 class="section-title">Crafting Upgrades</h2></div>
+      <div class="upgrades-layout">
+        <div class="craft-grid-wrap">
+          <div class="craft-grid-title">Crafting Grid</div>
+          <div class="craft-grid" id="craft-grid"></div>
+          <div class="craft-rate" id="craft-rate">Success Rate: —</div>
+          <button class="btn-primary" onclick="attemptUpgrade()">⚗️ Attempt Upgrade</button>
+        </div>
+        <div class="craft-arrow">→</div>
+        <div class="craft-result">
+          <h3>How It Works</h3>
+          <p>Place items into the grid. The simulator combines their rarities and tries to forge a <strong>higher-tier item</strong>.<br><br>
+          Success rate drops with higher rarity items.<br><br>
+          <strong style="color:#ef4444">⚠ Failure destroys all items!</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEADERBOARD -->
+    <div class="tab-content" id="leaderboard-tab">
+      <div class="section-header"><h2 class="section-title">Leaderboard</h2></div>
+      <div class="lb-filters">
+        <button class="lb-filter-btn active" onclick="setLbSort('inventory_value',this)">Inventory Value</button>
+        <button class="lb-filter-btn" onclick="setLbSort('money',this)">Money</button>
+        <button class="lb-filter-btn" onclick="setLbSort('cases_opened',this)">Cases Opened</button>
+      </div>
+      <div id="leaderboard-list"></div>
+    </div>
+
+    <!-- SLOTS -->
+    <div class="tab-content" id="slots-tab">
+      <div class="section-header"><h2 class="section-title">Slot Machine</h2></div>
+      <div class="slots-layout">
+        <div class="slots-machine">
+          <div class="slots-reels" id="slots-reels"></div>
+          <div id="slots-result" style="font-size:1.1rem;font-weight:800;min-height:24px;margin-bottom:16px;color:var(--accent)"></div>
+          <div class="bet-selector">
+            <button class="bet-btn active" onclick="selectBet(this,50)">$50</button>
+            <button class="bet-btn" onclick="selectBet(this,100)">$100</button>
+            <button class="bet-btn" onclick="selectBet(this,250)">$250</button>
+            <button class="bet-btn" onclick="selectBet(this,500)">$500</button>
+            <button class="bet-btn" onclick="selectBet(this,1000)">$1K</button>
+            <button class="bet-btn" onclick="selectBet(this,5000)">$5K</button>
+          </div>
+          <button class="btn-primary" id="slots-spin-btn" onclick="spinSlots(currentSlotBet)" style="padding:14px 48px;font-size:1.05rem;margin-top:8px">
+            🎰 SPIN
+          </button>
+        </div>
+        <p style="color:var(--text-dim);font-size:0.85rem;text-align:center;margin-top:12px">
+          Match 3 symbols = big win! Match 2 = small win. Higher rarity = bigger multipliers.
+        </p>
+      </div>
+    </div>
+
+    <!-- CRASH -->
+    <div class="tab-content" id="crash-tab">
+      <div class="section-header"><h2 class="section-title">Crash</h2></div>
+      <div class="crash-layout">
+        <div class="crash-display">
+          <div id="crash-multiplier">1.00x</div>
+          <div class="crash-label">Cash out before it crashes!</div>
+          <button class="btn-danger" id="crash-cashout" onclick="cashOutCrash()" disabled style="padding:14px 48px;font-size:1.05rem;border-radius:50px;margin-top:8px">
+            💸 CASH OUT
+          </button>
+        </div>
+        <div class="crash-controls">
+          <div class="crash-bet-row">
+            <span style="font-weight:600;color:var(--text-dim)">Bet:</span>
+            <input class="crash-bet-input" id="crash-bet" type="number" value="100" min="1"/>
+            <button class="bet-btn" onclick="document.getElementById('crash-bet').value=Math.floor(gameState.money*0.1)">10%</button>
+            <button class="bet-btn" onclick="document.getElementById('crash-bet').value=Math.floor(gameState.money*0.5)">50%</button>
+            <button class="bet-btn" onclick="document.getElementById('crash-bet').value=Math.floor(gameState.money)">ALL IN</button>
+          </div>
+          <button class="btn-primary" id="crash-start" onclick="startCrash(parseInt(document.getElementById('crash-bet').value)||100)" style="padding:14px 48px;font-size:1.05rem">
+            🚀 START
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PLINKO -->
+    <div class="tab-content" id="plinko-tab">
+      <div class="section-header"><h2 class="section-title">Plinko</h2></div>
+      <div class="plinko-layout">
+        <div id="plinko-result" style="font-size:1.2rem;font-weight:800;min-height:28px;margin-bottom:12px;color:var(--accent)"></div>
+        <canvas id="plinko-canvas" width="600" height="420"></canvas>
+        <div class="plinko-controls" style="margin-top:14px">
+          <span style="font-weight:600;color:var(--text-dim)">Bet:</span>
+          <input class="crash-bet-input" id="plinko-bet" type="number" value="100" min="1"/>
+          <button id="plinko-drop-btn" class="btn-primary" onclick="handlePlinkoDrop()" style="padding:14px 36px">🎯 DROP BALL</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- CASE MODAL -->
+<div class="modal-overlay" id="case-modal" onclick="handleModalClick(event)">
+  <div class="modal-box" id="case-modal-content-wrap">
+    <button class="modal-close" onclick="closeCaseModal()">✕</button>
+    <div id="case-modal-content"></div>
+  </div>
+</div>
+
+<!-- STATS MODAL -->
+<div class="modal-overlay" id="stats-modal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('stats-modal').classList.remove('active')">✕</button>
+    <h2 style="font-size:1.4rem;font-weight:800;margin-bottom:20px">📊 Your Stats</h2>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-label">Cases Opened</div><div class="stat-value" id="stat-cases">0</div></div>
+      <div class="stat-card"><div class="stat-label">Slots Spun</div><div class="stat-value" id="stat-slots">0</div></div>
+      <div class="stat-card"><div class="stat-label">Best Plinko</div><div class="stat-value" id="stat-plinko">0x</div></div>
+      <div class="stat-card"><div class="stat-label">Best Crash</div><div class="stat-value" id="stat-crash">0x</div></div>
+      <div class="stat-card"><div class="stat-label">Total Spent</div><div class="stat-value" id="stat-spent">$0</div></div>
+      <div class="stat-card"><div class="stat-label">Total Earned</div><div class="stat-value" id="stat-earned">$0</div></div>
+      <div class="stat-card"><div class="stat-label">Daily Streak</div><div class="stat-value" id="stat-streak">0 days</div></div>
+      <div class="stat-card"><div class="stat-label">Inventory Value</div><div class="stat-value" id="stat-inv">$0</div></div>
+      <div class="stat-card" style="grid-column:1/-1">
+        <div class="stat-label">Best Item Won</div>
+        <div class="stat-value" id="stat-bestitem">None yet</div>
+      </div>
+    </div>
+    <button class="btn-danger" onclick="signOut()" style="width:100%;margin-top:8px">🚪 Logout</button>
+  </div>
+</div>
+
+<!-- CRAFT PICKER -->
+<div class="craft-picker-overlay" id="craft-picker" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="craft-picker-box">
+    <button class="modal-close" onclick="document.getElementById('craft-picker').classList.remove('active')" style="top:12px;right:12px">✕</button>
+    <h3>Select an Item</h3>
+    <div id="craft-picker-list"></div>
+  </div>
+</div>
+
+<!-- TOASTS -->
+<div id="toasts"></div>
+
+<!-- SCRIPTS -->
+<script src="config.js"></script>
+<script src="js/items.js"></script>
+<script src="js/caseicons.js"></script>
+<script src="js/game.js"></script>
+<script src="js/minigames.js"></script>
+<script src="js/ui.js"></script>
+<script>
+let currentSlotBet = 50;
+
+function selectBet(btn, amount) {
+  currentSlotBet = amount;
+  document.querySelectorAll('.bet-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function switchAuthTab(tab) {
+  document.getElementById('login-form').classList.toggle('hidden', tab !== 'login');
+  document.getElementById('signup-form').classList.toggle('hidden', tab !== 'signup');
+  document.querySelectorAll('.auth-tab').forEach((t,i) => {
+    t.classList.toggle('active', (i===0&&tab==='login')||(i===1&&tab==='signup'));
+  });
+}
+
+async function handleLogin() {
+  const u = document.getElementById('login-username').value.trim();
+  const p = document.getElementById('login-password').value;
+  const err = document.getElementById('login-error');
+  err.style.display = 'none';
+  if (!u || !p) { err.textContent='Please fill in all fields.'; err.style.display='block'; return; }
+  const btn = document.querySelector('#login-form .btn-primary');
+  btn.textContent='Logging in...'; btn.disabled=true;
+  const { error } = await signIn(u, p);
+  btn.textContent='Login'; btn.disabled=false;
+  if (error) { err.textContent=error.message||'Login failed.'; err.style.display='block'; return; }
+  showScreen('game');
+}
+
+async function handleSignup() {
+  const u = document.getElementById('signup-username').value.trim();
+  const p = document.getElementById('signup-password').value;
+  const c = document.getElementById('signup-confirm').value;
+  const err = document.getElementById('signup-error');
+  err.style.display = 'none';
+  if (!u||!p||!c) { err.textContent='Please fill in all fields.'; err.style.display='block'; return; }
+  if (p!==c) { err.textContent='Passwords do not match.'; err.style.display='block'; return; }
+  if (p.length<6) { err.textContent='Password must be 6+ characters.'; err.style.display='block'; return; }
+  const btn = document.querySelector('#signup-form .btn-primary');
+  btn.textContent='Creating...'; btn.disabled=true;
+  const { error } = await signUp(u, p);
+  btn.textContent='Create Account'; btn.disabled=false;
+  if (error) { err.textContent=error.message||'Signup failed.'; err.style.display='block'; return; }
+  await signIn(u, p);
+  showScreen('game');
+}
+
+function handleLocalPlay() {
+  currentUser = { id:'local', username:'Guest' };
+  loadLocalState();
+  showScreen('game');
+}
+
+function handleModalClick(e) {
+  if (e.target===document.getElementById('case-modal') && !caseOpeningActive) closeCaseModal();
+}
+
+function setLbSort(sort, btn) {
+  lbSort = sort;
+  document.querySelectorAll('.lb-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadLeaderboard(lbSort);
+}
+
+function handlePlinkoDrop() {
+  const bet = parseInt(document.getElementById('plinko-bet').value)||100;
+  document.getElementById('plinko-drop-btn').disabled = true;
+  dropPlinko(bet);
+}
+
+// APP INIT
+(async function init() {
+  loadSounds();
+  const hasSupabase = initSupabase();
+  if (hasSupabase && supabase) {
+    try {
+      const { data:{ session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        currentUser = session.user;
+        const { data:profile } = await supabase.from('profiles').select('username').eq('id',session.user.id).single();
+        if (profile) currentUser.username = profile.username;
+        await loadProfile();
+        showScreen('game');
+        return;
+      }
+    } catch(e) { console.warn('Session check failed:', e); }
+  }
+  showScreen('auth');
+})();
+</script>
+</body>
+</html>
