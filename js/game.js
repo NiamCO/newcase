@@ -2,7 +2,7 @@
 //  GAME STATE & SUPABASE INTEGRATION
 // ============================================================
 
-let supabase = null;
+let sbClient = null;  // renamed from 'supabase' to avoid collision with Supabase CDN global
 let currentUser = null;
 let gameState = {
   money: STARTING_MONEY,
@@ -30,7 +30,7 @@ function initSupabase() {
     return false;
   }
   try {
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+    sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
     return true;
   } catch(e) {
     console.error("Supabase init failed:", e);
@@ -42,28 +42,28 @@ function initSupabase() {
 //  AUTH
 // ============================================================
 async function signUp(username, password) {
-  if(!supabase) return { error: { message: 'Supabase not configured. Edit config.js first.' }};
+  if(!sbClient) return { error: { message: 'Supabase not configured. Edit config.js first.' }};
   const email = username + "@minecraftcases.game";
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await sbClient.auth.signUp({
     email, password,
     options: { data: { username } }
   });
   if(!error && data.user) {
     // Update profile with username
-    await supabase.from('profiles').upsert({ id: data.user.id, username, money: STARTING_MONEY });
+    await sbClient.from('profiles').upsert({ id: data.user.id, username, money: STARTING_MONEY });
   }
   return { data, error };
 }
 
 async function signIn(username, password) {
-  if(!supabase) {
+  if(!sbClient) {
     // Local mode: just set a fake user
     currentUser = { id: 'local', username };
     loadLocalState();
     return { error: null };
   }
   const email = username + "@minecraftcases.game";
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
   if(!error && data.user) {
     currentUser = { ...data.user, username };
     await loadProfile();
@@ -72,7 +72,7 @@ async function signIn(username, password) {
 }
 
 async function signOut() {
-  if(supabase) await supabase.auth.signOut();
+  if(sbClient) await sbClient.auth.signOut();
   currentUser = null;
   gameState = { money: STARTING_MONEY, inventory: [], stats: { casesOpened:0, slotsSpun:0, totalSpent:0, totalEarned:0, dailyStreak:0, lastDailyClaim:null, bestItemName:null, bestItemValue:0, bestCrashMultiplier:0, bestPlinkoMultiplier:0 } };
   showScreen('auth');
@@ -82,9 +82,9 @@ async function signOut() {
 //  PROFILE LOAD / SAVE
 // ============================================================
 async function loadProfile() {
-  if(!supabase || !currentUser) { loadLocalState(); return; }
+  if(!sbClient || !currentUser) { loadLocalState(); return; }
   try {
-    const { data: profile } = await supabase.from('profiles').select('*').eq('id', currentUser.id).single();
+    const { data: profile } = await sbClient.from('profiles').select('*').eq('id', currentUser.id).single();
     if(profile) {
       currentUser.username = profile.username;
       gameState.money = parseFloat(profile.money) || STARTING_MONEY;
@@ -102,7 +102,7 @@ async function loadProfile() {
       };
     }
     // Load inventory
-    const { data: inv } = await supabase.from('inventory').select('*').eq('user_id', currentUser.id);
+    const { data: inv } = await sbClient.from('inventory').select('*').eq('user_id', currentUser.id);
     gameState.inventory = (inv || []).map(row => ({
       id: row.id,
       key: row.item_key,
@@ -118,9 +118,9 @@ async function loadProfile() {
 
 async function saveProfile() {
   saveLocalState();
-  if(!supabase || !currentUser || currentUser.id === 'local') return;
+  if(!sbClient || !currentUser || currentUser.id === 'local') return;
   try {
-    await supabase.from('profiles').upsert({
+    await sbClient.from('profiles').upsert({
       id: currentUser.id,
       username: currentUser.username,
       money: gameState.money,
@@ -144,9 +144,9 @@ async function addItemToInventory(item) {
     gameState.stats.bestItemValue = item.value;
     gameState.stats.bestItemName = item.name;
   }
-  if(supabase && currentUser && currentUser.id !== 'local') {
+  if(sbClient && currentUser && currentUser.id !== 'local') {
     try {
-      await supabase.from('inventory').insert({
+      await sbClient.from('inventory').insert({
         id: item.id,
         user_id: currentUser.id,
         item_key: item.key,
@@ -162,9 +162,9 @@ async function addItemToInventory(item) {
 
 async function removeItemsFromInventory(ids) {
   gameState.inventory = gameState.inventory.filter(i => !ids.includes(i.id));
-  if(supabase && currentUser && currentUser.id !== 'local') {
+  if(sbClient && currentUser && currentUser.id !== 'local') {
     try {
-      await supabase.from('inventory').delete().in('id', ids);
+      await sbClient.from('inventory').delete().in('id', ids);
     } catch(e) { console.error('Remove items error:', e); }
   }
 }
@@ -252,9 +252,9 @@ async function loadLeaderboard(sortBy = 'inventory_value') {
   board.innerHTML = '<div class="lb-loading">Loading...</div>';
 
   let rows = [];
-  if(supabase) {
+  if(sbClient) {
     try {
-      const { data } = await supabase.from('leaderboard').select('*');
+      const { data } = await sbClient.from('leaderboard').select('*');
       if(data) rows = data;
     } catch(e) {}
   }
@@ -409,9 +409,9 @@ window.setMoney = function(amount) {
 window.resetProgress = function() {
   if(confirm('Reset ALL progress? This cannot be undone!')) {
     localStorage.clear();
-    if(supabase && currentUser && currentUser.id !== 'local') {
-      supabase.from('inventory').delete().eq('user_id', currentUser.id);
-      supabase.from('profiles').update({ money: STARTING_MONEY, cases_opened:0, slots_spun:0, total_spent:0, total_earned:0, daily_streak:0, last_daily_claim:null, best_item_name:null, best_item_value:0 }).eq('id', currentUser.id);
+    if(sbClient && currentUser && currentUser.id !== 'local') {
+      sbClient.from('inventory').delete().eq('user_id', currentUser.id);
+      sbClient.from('profiles').update({ money: STARTING_MONEY, cases_opened:0, slots_spun:0, total_spent:0, total_earned:0, daily_streak:0, last_daily_claim:null, best_item_name:null, best_item_value:0 }).eq('id', currentUser.id);
     }
     location.reload();
   }
