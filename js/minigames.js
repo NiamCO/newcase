@@ -178,124 +178,293 @@ function cashOutCrash() {
 }
 
 // ============================================================
-//  PLINKO
+//  PLINKO  —  full physics rewrite
 // ============================================================
-const PLINKO_MULTIPLIERS = [0.2, 0.5, 1, 1.5, 2, 3, 5, 10, 5, 3, 2, 1.5, 1, 0.5, 0.2];
-const PLINKO_ROWS = 12;
 
-function dropPlinko(bet) {
-  if(!spendMoney(bet)) { showToast('Not enough money!','error'); return; }
-  gameState.stats.totalSpent += bet;
+const PLINKO_ROWS      = 14;
+const PLINKO_COLS      = PLINKO_ROWS + 1;          // 15 slots at bottom
+const PLINKO_MULTS     = [0.2,0.5,1,1.5,2,3,5,10,5,3,2,1.5,1,0.5,0.2];
+const PLINKO_BALL_R    = 8;
+const PLINKO_PEG_R     = 5;
+const GRAVITY          = 0.38;
+const BOUNCE           = 0.42;
+const FRICTION         = 0.995;
 
-  // Simulate ball path
-  let pos = 7; // center slot (out of 15)
-  const moves = [];
-  for(let i=0;i<PLINKO_ROWS;i++) {
-    const dir = Math.random() < 0.5 ? -1 : 1;
-    pos = Math.max(0, Math.min(14, pos + dir));
-    moves.push({ row:i, pos, dir });
+let plinkoRAF          = null;   // requestAnimationFrame handle
+let plinkoBalls        = [];     // active physics balls
+let plinkoRunning      = false;
+
+// Pre-build peg positions once when the board dimensions are known
+function buildPegs(W, H) {
+  const SLOT_H  = 52;
+  const TOP_PAD = 36;
+  const BOT_PAD = SLOT_H + 10;
+  const usable  = H - TOP_PAD - BOT_PAD;
+  const rowGap  = usable / (PLINKO_ROWS - 1);
+  const pegs = [];
+  for (let row = 0; row < PLINKO_ROWS; row++) {
+    const count  = row + 2;
+    const spread = (count - 1) * getPegSpacing(W);
+    for (let col = 0; col < count; col++) {
+      pegs.push({
+        x: W / 2 - spread / 2 + col * getPegSpacing(W),
+        y: TOP_PAD + row * rowGap,
+        row, col,
+      });
+    }
   }
-
-  animatePlinkoBall(moves, bet, pos);
+  return pegs;
 }
 
-function animatePlinkoBall(moves, bet, finalSlot) {
-  const canvas = document.getElementById('plinko-canvas');
-  if(!canvas) return;
+function getPegSpacing(W) { return W / (PLINKO_ROWS + 1); }
+
+function slotX(slot, W) {
+  const spacing = getPegSpacing(W);
+  return W / 2 - (PLINKO_COLS - 1) / 2 * spacing + slot * spacing;
+}
+
+// ── draw static board ────────────────────────────────────────
+function drawPlinkoBoard(canvas, highlightSlot = -1) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
+  const pegs = buildPegs(W, H);
+  const SLOT_H = 52;
 
-  let step = 0;
-  const cellW = W / 15;
+  ctx.clearRect(0, 0, W, H);
 
-  function draw() {
-    ctx.clearRect(0,0,W,H);
+  // faint grid lines
+  ctx.strokeStyle = '#ffffff06';
+  ctx.lineWidth = 1;
+  pegs.forEach(p => {
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(W/2, H - SLOT_H - 10);
+    ctx.stroke();
+  });
 
-    // Draw pegs
-    for(let row=0;row<PLINKO_ROWS;row++) {
-      const pegsInRow = row + 2;
-      for(let peg=0;peg<pegsInRow;peg++) {
-        const px = W/2 - ((pegsInRow-1)/2 - peg) * cellW;
-        const py = 40 + row * ((H-120)/PLINKO_ROWS);
-        ctx.beginPath();
-        ctx.arc(px,py,5,0,Math.PI*2);
-        ctx.fillStyle = '#35c895';
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#35c895';
-        ctx.fill();
-        ctx.shadowBlur = 0;
-      }
-    }
+  // pegs
+  pegs.forEach(p => {
+    // outer glow
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, PLINKO_PEG_R + 4, 0, Math.PI * 2);
+    const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, PLINKO_PEG_R + 4);
+    grd.addColorStop(0, '#35c89540');
+    grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.fill();
+    // core
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, PLINKO_PEG_R, 0, Math.PI * 2);
+    ctx.fillStyle = '#1e3a30';
+    ctx.fill();
+    ctx.strokeStyle = '#35c895';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // shine
+    ctx.beginPath();
+    ctx.arc(p.x - 1.5, p.y - 1.5, 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#35c895aa';
+    ctx.fill();
+  });
 
-    // Draw multiplier slots
-    PLINKO_MULTIPLIERS.forEach((mult,i)=>{
-      const sx = i * cellW;
-      const sy = H - 50;
-      const hue = mult >= 5 ? 45 : mult >= 2 ? 120 : mult >= 1 ? 200 : 0;
-      ctx.fillStyle = `hsl(${hue},80%,30%)`;
-      ctx.strokeStyle = `hsl(${hue},80%,60%)`;
-      ctx.lineWidth = 1.5;
+  // slot buckets
+  const spacing = getPegSpacing(W);
+  PLINKO_MULTS.forEach((mult, i) => {
+    const cx = slotX(i, W);
+    const sx = cx - spacing / 2 + 2;
+    const sy = H - SLOT_H;
+    const sw = spacing - 4;
+    const sh = SLOT_H - 4;
+
+    const big   = mult >= 5;
+    const med   = mult >= 2;
+    const hue   = big ? 40 : med ? 130 : mult >= 1 ? 210 : 0;
+    const light = big ? 55 : med ? 45 : mult >= 1 ? 40 : 30;
+    const alpha = (i === highlightSlot) ? 0.9 : 0.35;
+
+    // background
+    ctx.fillStyle = `hsla(${hue},80%,${light}%,${alpha})`;
+    ctx.beginPath();
+    ctx.roundRect(sx, sy, sw, sh, 6);
+    ctx.fill();
+
+    // border
+    ctx.strokeStyle = `hsl(${hue},80%,${light + 20}%)`;
+    ctx.lineWidth = i === highlightSlot ? 2.5 : 1.2;
+    ctx.stroke();
+
+    // label
+    ctx.fillStyle = `hsl(${hue},90%,${i === highlightSlot ? 95 : 75}%)`;
+    ctx.font = `bold ${mult >= 10 ? 11 : 10}px Poppins,sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(mult + 'x', cx, sy + sh / 2);
+  });
+}
+
+// ── draw all live balls ──────────────────────────────────────
+function drawBalls(canvas) {
+  const ctx = canvas.getContext('2d');
+  plinkoBalls.forEach(b => {
+    // trail
+    b.trail = b.trail || [];
+    b.trail.push({ x: b.x, y: b.y });
+    if (b.trail.length > 10) b.trail.shift();
+    b.trail.forEach((pt, ti) => {
+      const a = (ti / b.trail.length) * 0.3;
       ctx.beginPath();
-      ctx.roundRect(sx+2,sy,cellW-4,40,4);
+      ctx.arc(pt.x, pt.y, PLINKO_BALL_R * (ti / b.trail.length), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(251,191,36,${a})`;
       ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = `hsl(${hue},80%,80%)`;
-      ctx.font = 'bold 9px Poppins';
-      ctx.textAlign = 'center';
-      ctx.fillText(mult+'x', sx+cellW/2, sy+25);
+    });
+    // glow
+    const grd = ctx.createRadialGradient(b.x - 2, b.y - 2, 1, b.x, b.y, PLINKO_BALL_R + 6);
+    grd.addColorStop(0, '#fef08a');
+    grd.addColorStop(0.5, '#f59e0b');
+    grd.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, PLINKO_BALL_R + 6, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+    // core
+    const core = ctx.createRadialGradient(b.x - 2, b.y - 2, 1, b.x, b.y, PLINKO_BALL_R);
+    core.addColorStop(0, '#fff9c4');
+    core.addColorStop(0.6, '#fbbf24');
+    core.addColorStop(1, '#b45309');
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, PLINKO_BALL_R, 0, Math.PI * 2);
+    ctx.fillStyle = core;
+    ctx.fill();
+  });
+}
+
+// ── physics tick ─────────────────────────────────────────────
+function tickPlinko(canvas, pegs, onSettle) {
+  const W = canvas.width, H = canvas.height;
+  const SLOT_H  = 52;
+  const FLOOR_Y = H - SLOT_H + PLINKO_BALL_R + 2;
+
+  plinkoBalls.forEach(b => {
+    if (b.settled) return;
+
+    b.vy += GRAVITY;
+    b.vx *= FRICTION;
+    b.x  += b.vx;
+    b.y  += b.vy;
+
+    // peg collisions
+    pegs.forEach(p => {
+      const dx = b.x - p.x;
+      const dy = b.y - p.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const minD = PLINKO_BALL_R + PLINKO_PEG_R;
+      if (dist < minD && dist > 0) {
+        const nx = dx / dist, ny = dy / dist;
+        // push out
+        b.x = p.x + nx * (minD + 0.5);
+        b.y = p.y + ny * (minD + 0.5);
+        // reflect velocity
+        const dot = b.vx * nx + b.vy * ny;
+        b.vx = (b.vx - 2 * dot * nx) * BOUNCE + (Math.random() - 0.5) * 0.8;
+        b.vy = (b.vy - 2 * dot * ny) * BOUNCE;
+        if (b.vy < 0.5) b.vy = 0.5;
+      }
     });
 
-    // Ball position
-    if(step < moves.length) {
-      const m = moves[step];
-      const bx = W/2 - ((PLINKO_ROWS+1)/2 - m.pos) * cellW/2 * (m.row/PLINKO_ROWS + 0.1);
-      const by = 40 + m.row * ((H-120)/PLINKO_ROWS);
-      ctx.beginPath();
-      ctx.arc(bx,by,10,0,Math.PI*2);
-      const gradient = ctx.createRadialGradient(bx-3,by-3,1,bx,by,10);
-      gradient.addColorStop(0,'#fef08a');
-      gradient.addColorStop(1,'#f59e0b');
-      ctx.fillStyle = gradient;
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = '#fbbf24';
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    } else {
-      // Final position
-      const bx = finalSlot * cellW + cellW/2;
-      const by = H - 50;
-      ctx.beginPath();
-      ctx.arc(bx,by-15,12,0,Math.PI*2);
-      const gradient = ctx.createRadialGradient(bx-3,by-18,1,bx,by-15,12);
-      gradient.addColorStop(0,'#fef08a');
-      gradient.addColorStop(1,'#f59e0b');
-      ctx.fillStyle = gradient;
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = '#fbbf24';
-      ctx.fill();
-    }
-  }
+    // wall collisions
+    if (b.x < PLINKO_BALL_R)       { b.x = PLINKO_BALL_R;      b.vx = Math.abs(b.vx) * BOUNCE; }
+    if (b.x > W - PLINKO_BALL_R)   { b.x = W - PLINKO_BALL_R;  b.vx = -Math.abs(b.vx) * BOUNCE; }
 
-  const timer = setInterval(()=>{
-    draw();
-    step++;
-    if(step > moves.length) {
-      clearInterval(timer);
-      const mult = PLINKO_MULTIPLIERS[finalSlot];
-      const win = Math.round(bet * mult);
-      addMoney(win);
-      gameState.stats.totalEarned += win;
-      if(mult > gameState.stats.bestPlinkoMultiplier) gameState.stats.bestPlinkoMultiplier = mult;
-      saveProfile();
-      const result = document.getElementById('plinko-result');
-      if(result) {
-        result.textContent = `${mult}x = ${formatMoney(win)}`;
-        result.style.color = mult >= 1 ? '#35c895' : '#ef4444';
+    // floor
+    if (b.y >= FLOOR_Y) {
+      b.y  = FLOOR_Y;
+      b.vy = -b.vy * 0.25;
+      b.vx *=  0.6;
+      if (Math.abs(b.vy) < 0.8) {
+        b.vy = 0;
+        b.settled = true;
+        // find closest slot
+        const spacing = getPegSpacing(W);
+        let best = 0, bestD = Infinity;
+        PLINKO_MULTS.forEach((_, i) => {
+          const d = Math.abs(b.x - slotX(i, W));
+          if (d < bestD) { bestD = d; best = i; }
+        });
+        b.slot = best;
+        onSettle(b);
       }
-      if(win >= bet) { showToast(`🎯 Plinko ${mult}x! +${formatMoney(win)}`,'success'); playSound('caseopened'); }
-      else { showToast(`Plinko ${mult}x — ${formatMoney(win)}`,'error'); }
-      const dropBtn = document.getElementById('plinko-drop-btn');
-      if(dropBtn) dropBtn.disabled = false;
     }
-  }, 80);
+  });
+}
+
+// ── main loop ────────────────────────────────────────────────
+function plinkoLoop(canvas, pegs, onSettle) {
+  drawPlinkoBoard(canvas);
+  tickPlinko(canvas, pegs, onSettle);
+  drawBalls(canvas);
+  if (plinkoBalls.some(b => !b.settled)) {
+    plinkoRAF = requestAnimationFrame(() => plinkoLoop(canvas, pegs, onSettle));
+  } else {
+    plinkoRunning = false;
+  }
+}
+
+// ── public API ───────────────────────────────────────────────
+function dropPlinko(bet) {
+  if (!spendMoney(bet)) { showToast('Not enough money!', 'error'); return; }
+  gameState.stats.totalSpent += bet;
+
+  const canvas = document.getElementById('plinko-canvas');
+  if (!canvas) return;
+
+  // cancel any running animation
+  if (plinkoRAF) { cancelAnimationFrame(plinkoRAF); plinkoRAF = null; }
+
+  const pegs = buildPegs(canvas.width, canvas.height);
+  const spacing = getPegSpacing(canvas.width);
+
+  // slight random offset from center so ball doesn't fall straight
+  const ball = {
+    x:  canvas.width / 2 + (Math.random() - 0.5) * spacing * 0.6,
+    y:  10,
+    vx: (Math.random() - 0.5) * 1.2,
+    vy: 1.5,
+    trail: [],
+    settled: false,
+    slot: -1,
+    bet,
+  };
+
+  plinkoBalls = [ball];
+  plinkoRunning = true;
+
+  plinkoLoop(canvas, pegs, (settled) => {
+    // flash winning slot
+    const flashCanvas = document.getElementById('plinko-canvas');
+    let flashes = 0;
+    const flashTimer = setInterval(() => {
+      drawPlinkoBoard(flashCanvas, flashes % 2 === 0 ? settled.slot : -1);
+      drawBalls(flashCanvas);
+      flashes++;
+      if (flashes > 7) {
+        clearInterval(flashTimer);
+        drawPlinkoBoard(flashCanvas, settled.slot);
+        drawBalls(flashCanvas);
+        // payout
+        const mult = PLINKO_MULTS[settled.slot];
+        const win  = Math.round(settled.bet * mult);
+        addMoney(win);
+        gameState.stats.totalEarned += win;
+        if (mult > gameState.stats.bestPlinkoMultiplier) gameState.stats.bestPlinkoMultiplier = mult;
+        saveProfile();
+        const resultEl = document.getElementById('plinko-result');
+        if (resultEl) {
+          resultEl.textContent = `${mult}x  →  ${formatMoney(win)}`;
+          resultEl.style.color = mult >= 1 ? '#35c895' : '#ef4444';
+        }
+        if (win >= settled.bet) { showToast(`🎯 ${mult}x! You won ${formatMoney(win)}`, 'success'); playSound('caseopened'); }
+        else                    { showToast(`${mult}x — ${formatMoney(win)}`, 'error'); }
+        const btn = document.getElementById('plinko-drop-btn');
+        if (btn) btn.disabled = false;
+      }
+    }, 90);
+  });
 }
