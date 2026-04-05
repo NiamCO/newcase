@@ -441,7 +441,9 @@ creator_case: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
     </svg>`;
   }
 
-  return icons[caseId] || getGenericIcon(CASES.find(c=>c.id===caseId)||{price:100});
+  // Merge in extra icons defined below
+  const all = { ...icons, ...EXTRA_ICONS };
+  return all[caseId] || getGenericIcon(CASES.find(c=>c.id===caseId)||{price:100});
 }
 
 // ============================================================
@@ -648,8 +650,4 @@ deep_dark_case: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
 
 };
 
-// Merge extra icons into the main icons object inside getCaseIcon
-const _origGetCaseIcon = getCaseIcon;
-function getCaseIcon(caseId) {
-  return EXTRA_ICONS[caseId] || _origGetCaseIcon(caseId);
-}
+// EXTRA_ICONS is merged inside getCaseIcon above via spread — no override needed
