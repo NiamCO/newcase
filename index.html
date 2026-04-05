@@ -340,12 +340,12 @@ function handlePlinkoDrop() {
 (async function init() {
   loadSounds();
   const hasSupabase = initSupabase();
-  if (hasSupabase && supabase) {
+  if (hasSupabase && sbClient) {
     try {
-      const { data:{ session } } = await supabase.auth.getSession();
+      const { data:{ session } } = await sbClient.auth.getSession();
       if (session?.user) {
         currentUser = session.user;
-        const { data:profile } = await supabase.from('profiles').select('username').eq('id',session.user.id).single();
+        const { data:profile } = await sbClient.from('profiles').select('username').eq('id',session.user.id).single();
         if (profile) currentUser.username = profile.username;
         await loadProfile();
         showScreen('game');
